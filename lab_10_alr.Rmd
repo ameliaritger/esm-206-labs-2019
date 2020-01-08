@@ -1,0 +1,178 @@
+---
+title: "last lab 206"
+author: "Amelia Ritger"
+date: "12/3/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(janitor)
+library(corrplot)
+library(beepr)
+library(praise)
+library(stargazer)
+library(sf)
+library(gganimate)
+library(transformr)
+```
+
+## Objectives:
+
+- Multiple linear regression
+- Our first map with sf and ggplot
+
+### Part 1. Multiple linear regression : SLO home prices
+
+```{r}
+homes <- read_csv("slo_homes.csv") %>%
+  clean_names()
+
+beep(2)
+
+praise()
+names(praise_parts)
+praise("You are totally ${adjective}! Super ${EXCLAMATION}")
+```
+
+```{r}
+homes_sub <- homes %>%
+  filter(city %in% c("San Luis Obispo", "Atascadero", "Arroyo Grande"))
+beep(3)
+```
+
+Are there correlations between variables that we'd consider while trying to model home price?
+
+```{r}
+homes_cor <- cor(homes_sub[2:5])
+
+corrplot(homes_cor,
+         method="ellipse",
+         type="upper")
+```
+
+```{r}
+ggplot(data=homes_sub, aes(x=sq_ft, y=price)) +
+  geom_point()
+```
+
+Let's start with a complete model (includes city, bedrooms, bathrooms, sq_ft, and sale status):
+
+```{r}
+homes_lm <- lm(price ~ city + bedrooms + bathrooms +sq_ft + status, data=homes_sub)
+summary(homes_lm)
+#home price = 1834130 - 167396(Atasc) + 31018(SLO) - 161645(bedrooms)...
+#with all else being equal, this tells us we expect a home in Atascadero to be $167k less than in Arroyo Grande (or $31k more in SLO)
+#bedrooms variable is concerning... why would a home price decrease by $161k with every additional bedroom?
+```
+
+Now let's try another version of the model:
+Just using sq_ft as a measure of home size
+
+```{r}
+homes_lm2 <- lm(price ~ city + sq_ft + status, data=homes_sub)
+praise()
+beep(6)
+summary(homes_lm2) #good example here why interpreting intercept is not interesting/difficult
+```
+
+AIC
+
+```{r}
+AIC(homes_lm) #better model fit...but obviously don't rely only on AIC (also because model 1 doesn't make total sense)
+AIC(homes_lm2)
+```
+
+### Now: check assumptions for normality and homoscedasticity
+```{r}
+plot(homes_lm2)
+# Yep, looks like the assumption of constant variances of residuals (homoscedasticity) is OK from residuals vs fitted plot
+# normality of residuals from q-q plot (good)
+praise()
+```
+
+Make a nice regression table:
+```{r, results='asis'}
+stargazer(homes_lm2, type="html")
+```
+
+Let's make some predictions for home price based on a new data frame of home characteristics.
+
+Make sure that the variables we create for the new data match the variables that the model will be looking for to make new predictions.
+
+```{r}
+new_df <- data.frame(
+  city = rep(c("San Luis Obispo", "Arroyo Grande", "Atascadero"), each=10),
+  sq_ft = rep(seq(1000, 5000, length=10)),
+  status = "Regular"
+)
+```
+
+Now we'll make predictions for home price based on that new data:
+```{r}
+predict_df <- predict(homes_lm2, newdata=new_df) #what is the predicted home value given the model and sq_ft I specified?
+
+#bind together the new df with the predictions
+full_data <- data.frame(new_df, predict_df)
+```
+
+Now plot in ggplot2:
+```{r}
+ggplot() +
+  geom_point(data=homes_sub, aes(x=sq_ft, y=price, color=city, pch=city)) +
+  geom_line(data=full_data, aes(x=sq_ft, y=predict_df, color=city)) +
+  scale_color_manual(values=c("orange", "magenta", "black")) +
+  theme_bw()
+```
+ 
+### Our first map (thanks `{sf}` package!)
+
+`sf`: by Edzer Pebesma
+Great beacuse: sticky geometries
+*With sticky geometries, you can wrangle columns variables whatever and the geometry will stick to it!*
+
+
+```{r}
+dams <- read_csv("ca_dams.csv") %>%
+  clean_names() %>%
+  drop_na(latitude) %>%
+  drop_na(longitude) %>%
+  drop_na(year_completed)
+
+#Convert our data from to an sf object using st_as_sf
+dams_sf <- st_as_sf(dams, coords = c("longitude", "latitude"))
+class(dams_sf)
+st_crs(dams_sf) <- 4326 # telling R what coordinate system to use
+plot(dams_sf) # dam, plot() is powerful!
+```
+
+Read in the California border polygon data:
+```{r}
+ca_border <- read_sf(here::here("ca_state_border"), layer="CA_State_Tiger2016")
+plot(ca_border)
+```
+
+Now let's plot them together with ggplot2:
+```{r}
+ggplot() +
+  geom_sf(data=ca_border, fill="darkgreen", color="darkgreen", alpha=0.2) +
+  geom_sf(data=dams_sf, color="blue", size=1, alpha=0.4) +
+  theme_void()
+```
+
+Now let's animate it with gganimate
+```{r}
+ggplot() +
+  geom_sf(data=ca_border, fill="darkgreen", color="darkgreen", alpha=0.2) +
+  geom_sf(data=dams_sf, color="blue", size=1, alpha=0.4) +
+  theme_void() +
+  labs(title='Year:{round(frame_time,0)}') +
+  gganimate::transition_time(year_completed) +
+  shadow_mark()
+
+beep(2)
+```
+
+
+
